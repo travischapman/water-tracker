@@ -63,6 +63,12 @@ function CupJug() {
   );
 }
 
+const DRINK_SEGMENT_COLOR = {
+  milk: "#D4B896",
+  oj:   "#FFB45A",
+  soda: "#C58BD9",
+};
+
 const DRINKS = [
   { id: "small",   label: "Small Cup",  oz: 8,  waterPct: 1.0,  color: "#7CC2FF", icon: <CupSmall /> },
   { id: "bottle",  label: "Big Bottle", oz: 24, waterPct: 1.0,  color: "#4FA8F5", icon: <CupBottle /> },
@@ -140,10 +146,20 @@ function Splash({ x, y, color, onDone }) {
 }
 
 // ── Big water bottle viz ────────────────────────────────────────────────────
-function Bottle({ pct, goal, ozCounted, theme }) {
+function Bottle({ pct, goal, ozCounted, theme, log, drinks }) {
   const fillPct = Math.max(0, Math.min(1, pct));
   const tickMarks = [0.25, 0.5, 0.75, 1.0];
   const reachedGoal = fillPct >= 1;
+
+  const drinkMap = useMemo(() => Object.fromEntries((drinks || []).map(d => [d.id, d])), [drinks]);
+  const segments = useMemo(() => (log || []).map(entry => {
+    const drink = drinkMap[entry.drinkId];
+    const isWater = drink?.waterPct === 1.0;
+    return {
+      heightPct: (entry.water / goal) * 100,
+      color: isWater ? theme.water : (DRINK_SEGMENT_COLOR[entry.drinkId] || theme.water),
+    };
+  }), [log, drinkMap, goal, theme]);
 
   return (
     <div className={`bottle-wrap ${reachedGoal ? "goal" : ""}`}>
@@ -152,10 +168,12 @@ function Bottle({ pct, goal, ozCounted, theme }) {
         <div className="bottle-neck" />
         <div className="bottle-body">
           <div className="bottle-shine" />
-          <div
-            className="bottle-water"
-            style={{ height: `${fillPct * 100}%`, background: theme.water }}
-          >
+          <div className="bottle-fill" style={{ height: `${fillPct * 100}%` }}>
+            <div className="bottle-segments">
+              {segments.map((seg, i) => (
+                <div key={i} className="bottle-segment" style={{ height: `${seg.heightPct}%`, background: seg.color }} />
+              ))}
+            </div>
             <svg className="wave" viewBox="0 0 200 20" preserveAspectRatio="none">
               <path d="M0 10 Q 25 0 50 10 T 100 10 T 150 10 T 200 10 V 20 H 0 Z" />
             </svg>
@@ -441,7 +459,7 @@ function App() {
 
       <main className="main">
         <section className="left-col">
-          <Bottle pct={pct} goal={t.dailyGoal} ozCounted={totalWater} theme={theme} />
+          <Bottle pct={pct} goal={t.dailyGoal} ozCounted={totalWater} theme={theme} log={log} drinks={DRINKS} />
 
           {reachedGoal && !revealed && (
             <button className="treasure-cta" onClick={openTreasure}>
