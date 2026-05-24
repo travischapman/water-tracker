@@ -670,7 +670,7 @@ button.coll-cell.viewing {
 /* ── Prize reveal ────────────────────────────────────────────────────────── */
 .prize { position: relative; padding: 12px 0 8px; }
 .prize-rays {
-  position: absolute; inset: -40px; z-index: 0;
+  position: absolute; inset: -40px; z-index: 0; pointer-events: none;
   background:
     conic-gradient(from 0deg,
       transparent 0deg, color-mix(in srgb, var(--prize-ring) 30%, transparent) 8deg,
@@ -911,7 +911,7 @@ button.coll-cell.viewing {
 /* Champion */
 .tourney-champion { position: relative; padding: 12px 0 8px; }
 .tourney-champion__rays {
-  position: absolute; inset: -40px; z-index: 0;
+  position: absolute; inset: -40px; z-index: 0; pointer-events: none;
   background:
     conic-gradient(from 0deg,
       transparent 0deg, color-mix(in srgb, var(--prize-ring) 30%, transparent) 8deg,
