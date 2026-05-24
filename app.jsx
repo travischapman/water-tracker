@@ -78,6 +78,106 @@ const DRINKS = [
   { id: "soda",    label: "Soda",       oz: 8,  waterPct: 0.89, color: "#C58BD9", icon: "🥤" },
 ];
 
+// ── Tournament simulation ──────────────────────────────────────────────────
+function simulateFight(left, right, leftStartHp) {
+  let leftHp  = leftStartHp;
+  let rightHp = right.stats.health;
+  const log   = [];
+
+  for (let round = 0; round < 200; round++) {
+    const pairs = left.stats.speed > right.stats.speed ||
+      (left.stats.speed === right.stats.speed && left.stats.sneaky >= right.stats.sneaky)
+      ? [[left, right], [right, left]]
+      : [[right, left], [left, right]];
+
+    for (const [atk, def] of pairs) {
+      const defHpRef = atk.id === left.id ? { get: () => rightHp, set: v => rightHp = v }
+                                           : { get: () => leftHp,  set: v => leftHp  = v };
+      const atkHpRef = atk.id === left.id ? { get: () => leftHp }
+                                           : { get: () => rightHp };
+
+      if (defHpRef.get() <= 0) continue;
+
+      const dodgeChance = Math.min(def.stats.sneaky * 0.04, 0.35);
+      if (Math.random() < dodgeChance) {
+        log.push({ type: "dodge", attackerId: atk.id, defenderId: def.id,
+          text: `${def.emoji} ${def.name} dodges!` });
+        continue;
+      }
+
+      let dmg = Math.max(1, Math.round(atk.stats.damage * (0.8 + Math.random() * 0.4)));
+      const isCrit = atk.stats.sneaky >= 8 && Math.random() < 0.15;
+      if (isCrit) dmg *= 2;
+
+      defHpRef.set(Math.max(0, defHpRef.get() - dmg));
+      log.push({
+        type: isCrit ? "crit" : "attack",
+        attackerId: atk.id, defenderId: def.id,
+        damage: dmg, defenderHpAfter: defHpRef.get(),
+        text: isCrit
+          ? `💥 CRIT! ${atk.emoji} ${atk.name} hits ${def.emoji} ${def.name} for ${dmg}!`
+          : `${atk.emoji} ${atk.name} hits ${def.emoji} ${def.name} for ${dmg}.`,
+      });
+
+      if (defHpRef.get() <= 0) {
+        log.push({ type: "ko", attackerId: atk.id, defenderId: def.id,
+          text: `⭐ ${def.emoji} ${def.name} is defeated!` });
+        const winnerId  = atk.id;
+        const winnerEndHp = atkHpRef.get();
+        return { winnerId, winnerEndHp, log };
+      }
+    }
+  }
+
+  // Fallback: whoever has more HP wins
+  const winnerId  = leftHp >= rightHp ? left.id : right.id;
+  const winnerEndHp = leftHp >= rightHp ? leftHp : rightHp;
+  log.push({ type: "ko", attackerId: winnerId, defenderId: winnerId === left.id ? right.id : left.id,
+    text: "⏱️ Time's up — most HP wins!" });
+  return { winnerId, winnerEndHp, log };
+}
+
+function simulateTourney(allTreasures) {
+  const fighters = allTreasures.map(t => ({ ...t, stats: getTreasureStats(t) }));
+  for (let i = fighters.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [fighters[i], fighters[j]] = [fighters[j], fighters[i]];
+  }
+
+  const matchups = [];
+  let current = { ...fighters[0], currentHp: fighters[0].stats.health };
+
+  for (let i = 1; i < fighters.length; i++) {
+    const challenger = fighters[i];
+    const result = simulateFight(current, challenger, current.currentHp);
+    matchups.push({
+      left:     { ...current,    startHp: current.currentHp },
+      right:    { ...challenger, startHp: challenger.stats.health },
+      log:      result.log,
+      winnerId: result.winnerId,
+    });
+    if (result.winnerId === current.id) {
+      current = { ...current, currentHp: result.winnerEndHp };
+    } else {
+      current = { ...challenger, currentHp: result.winnerEndHp };
+    }
+  }
+
+  return { matchups, winnerId: current.id };
+}
+
+function computeHpFromLog(matchup, side, events) {
+  const fighter  = side === "left" ? matchup.left : matchup.right;
+  const startHp  = fighter.startHp;
+  let hp = startHp;
+  for (const ev of events) {
+    if (ev.defenderId === fighter.id && ev.defenderHpAfter !== undefined) {
+      hp = ev.defenderHpAfter;
+    }
+  }
+  return Math.max(0, hp);
+}
+
 // ── Storage helpers ────────────────────────────────────────────────────────
 const dateToKey = (d) =>
   `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -299,6 +399,192 @@ function NamePrompt({ onSave }) {
   );
 }
 
+// ── Tournament components ──────────────────────────────────────────────────
+function TourneyIntro({ fighters, onStart }) {
+  useEffect(() => {
+    const t = setTimeout(onStart, 2800);
+    return () => clearTimeout(t);
+  }, [onStart]);
+  return (
+    <div className="tourney-intro">
+      <div className="tourney-intro__title">⚔️ Tournament!</div>
+      <div className="tourney-intro__subtitle">{fighters.length} fighters enter…</div>
+      <div className="tourney-intro__roster">
+        {fighters.map((c, i) => (
+          <span key={c.t.id} className="tourney-intro__fighter"
+                style={{ animationDelay: `${i * 80}ms` }}>
+            {c.t.emoji}
+          </span>
+        ))}
+      </div>
+      <button className="prize-close" onClick={onStart}>Battle! ⚔️</button>
+    </div>
+  );
+}
+
+function FighterCard({ fighter, side, hpMax, hpNow, winnerId, animState }) {
+  const isWinner = fighter.id === winnerId;
+  const tint     = TREASURE_TINTS[fighter.rarity];
+  const hpPct    = Math.max(0, Math.min(1, hpNow / hpMax));
+  const hpColor  = hpPct > 0.5 ? "#4CAF50" : hpPct > 0.25 ? "#FF9800" : "#F44336";
+
+  let extra = "";
+  if (animState === "smashing" || animState === "loser-out" || animState === "done") {
+    extra = isWinner ? " fighter-card--smash" : " fighter-card--loser-shake";
+  }
+  if (animState === "loser-out" && !isWinner) extra += " fighter-card--loser-exit";
+
+  return (
+    <div className={`fighter-card fighter-card--${side}${extra}`}
+         style={{ "--cell-bg": tint.bg, "--cell-ring": tint.ring }}>
+      <div className="fighter-card__emoji">{fighter.emoji}</div>
+      <div className="fighter-card__name">{fighter.name}</div>
+      <div className="fighter-card__hp-bar">
+        <div className="fighter-card__hp-fill"
+             style={{ width: `${hpPct * 100}%`, background: hpColor }} />
+      </div>
+      <div className="fighter-card__hp-label">
+        {Math.max(0, Math.round(hpNow))} / {hpMax}
+      </div>
+      <div className="fighter-card__stats">
+        <span>❤️ {fighter.stats.health}</span>
+        <span>⚡ {fighter.stats.speed}</span>
+        <span>👁️ {fighter.stats.sneaky}</span>
+        <span>⚔️ {fighter.stats.damage}</span>
+      </div>
+    </div>
+  );
+}
+
+function BattleLog({ events }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [events]);
+  return (
+    <div className="battle-log" ref={ref}>
+      {events.map((ev, i) => (
+        <div key={i} className={`battle-log__event battle-log__event--${ev.type}`}>
+          {ev.text}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TourneyBattle({ matchup, matchupIndex, totalMatchups, onMatchupDone }) {
+  const [logVisible, setLogVisible] = useState([]);
+  const [animState, setAnimState]   = useState("idle");
+
+  useEffect(() => {
+    setLogVisible([]);
+    setAnimState("idle");
+    const delay = matchup.log.length > 30 ? Math.max(80, 6600 / matchup.log.length) : 220;
+    let i = 0;
+    const id = setInterval(() => {
+      if (i < matchup.log.length) {
+        const ev = matchup.log[i++];
+        setLogVisible(prev => [...prev, ev]);
+      } else {
+        clearInterval(id);
+        setAnimState("smashing");
+        setTimeout(() => setAnimState("loser-out"), 800);
+        setTimeout(() => setAnimState("done"), 1400);
+        setTimeout(onMatchupDone, 2200);
+      }
+    }, delay);
+    return () => clearInterval(id);
+  }, [matchup]);
+
+  const leftHp  = computeHpFromLog(matchup, "left",  logVisible);
+  const rightHp = computeHpFromLog(matchup, "right", logVisible);
+
+  return (
+    <div className="tourney-battle">
+      <div className="tourney-battle__header">
+        Match {matchupIndex + 1} / {totalMatchups}
+      </div>
+      <div className="tourney-arena">
+        <FighterCard fighter={matchup.left}  side="left"
+          hpMax={matchup.left.startHp}         hpNow={leftHp}
+          winnerId={matchup.winnerId} animState={animState} />
+        <div className="tourney-vs">VS</div>
+        <FighterCard fighter={matchup.right} side="right"
+          hpMax={matchup.right.startHp}        hpNow={rightHp}
+          winnerId={matchup.winnerId} animState={animState} />
+      </div>
+      <BattleLog events={logVisible} />
+    </div>
+  );
+}
+
+function TourneyChampion({ champion, tourney, onClose }) {
+  const tint      = TREASURE_TINTS[champion.rarity];
+  const totalWins = (tourney.wins[champion.id] || 0);
+  return (
+    <div className="tourney-champion">
+      <div className="tourney-champion__rays" style={{ "--prize-ring": tint.ring }} />
+      <div className="tourney-champion__crown">👑</div>
+      <div className="prize-disc tourney-champion__disc"
+           style={{ "--prize-bg": tint.bg, "--prize-ring": tint.ring }}>
+        <span className="tourney-champion__emoji">{champion.emoji}</span>
+      </div>
+      <div className="prize-rarity tourney-champion__label" style={{ color: tint.ring }}>
+        Champion!
+      </div>
+      <div className="tourney-champion__name">{champion.name}</div>
+      <div className="tourney-champion__wins">
+        ⚔️ {totalWins} tournament win{totalWins !== 1 ? "s" : ""}
+      </div>
+      <button className="prize-close" onClick={onClose}>Amazing! 🎉</button>
+    </div>
+  );
+}
+
+function TournamentModal({ collectedAwards, tourney, onClose, onWin }) {
+  const [phase, setPhase]             = useState("intro");
+  const [matchupIndex, setMatchupIndex] = useState(0);
+  const hasRecordedWin                = useRef(false);
+
+  const [result] = useState(() => simulateTourney(collectedAwards.map(c => c.t)));
+
+  useEffect(() => {
+    if (phase === "champion" && !hasRecordedWin.current) {
+      hasRecordedWin.current = true;
+      onWin(result.winnerId);
+    }
+  }, [phase]);
+
+  const champion = collectedAwards.find(c => c.t.id === result.winnerId)?.t;
+
+  return (
+    <div className="reveal-backdrop" onClick={() => {}}>
+      <div className="tourney-modal" onClick={e => e.stopPropagation()}>
+        {phase === "intro" && (
+          <TourneyIntro fighters={collectedAwards} onStart={() => setPhase("battle")} />
+        )}
+        {phase === "battle" && (
+          <TourneyBattle
+            matchup={result.matchups[matchupIndex]}
+            matchupIndex={matchupIndex}
+            totalMatchups={result.matchups.length}
+            onMatchupDone={() => {
+              if (matchupIndex + 1 < result.matchups.length) {
+                setMatchupIndex(i => i + 1);
+              } else {
+                setPhase("champion");
+              }
+            }}
+          />
+        )}
+        {phase === "champion" && champion && (
+          <TourneyChampion champion={champion} tourney={tourney} onClose={onClose} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main app ───────────────────────────────────────────────────────────────
 const TWEAK_DEFAULTS = {
   kidName: "",
@@ -332,17 +618,20 @@ function App() {
   const today = todayKey();
   const [viewedDay, setViewedDay] = useState(today);
   const [days, setDays] = useState({});
+  const [tourney, setTourney] = useState({ lastDate: null, wins: {} });
   const [splashes, setSplashes] = useState([]);
   const [showModal, setShowModal] = useState(false);
+  const [showTournament, setShowTournament] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Hydrate day data
+  // Hydrate
   useEffect(() => {
     const s = loadState();
-    if (s && s.days) setDays(s.days);
+    if (s?.days)   setDays(s.days);
+    if (s?.tourney) setTourney(s.tourney);
   }, []);
-  // Persist day data
-  useEffect(() => { saveState({ days }); }, [days]);
+  // Persist
+  useEffect(() => { saveState({ days, tourney }); }, [days, tourney]);
 
   const isToday = viewedDay === today;
   const dayData = days[viewedDay] || { log: [], revealed: false, prize: null };
@@ -388,12 +677,21 @@ function App() {
   };
 
   const resetToday = () => patchDay(today, { log: [], revealed: false, prize: null });
-  const resetEverything = () => setDays({});
+  const resetEverything = () => { setDays({}); setTourney({ lastDate: null, wins: {} }); };
+
+  const recordTourneyWin = useCallback((treasureId) => {
+    setTourney(cur => ({
+      lastDate: todayKey(),
+      wins: { ...cur.wins, [treasureId]: (cur.wins[treasureId] || 0) + 1 },
+    }));
+  }, []);
 
   const collectionDetail = Object.entries(days)
     .filter(([, d]) => d.prize)
     .map(([k, d]) => ({ day: k, t: d.prize, rarity: d.prize.rarity }))
     .sort((a, b) => (a.day < b.day ? 1 : -1));
+
+  const canRunTourney = collectionDetail.length >= 2 && tourney.lastDate !== todayKey();
 
   // Day navigation
   const goPrev  = () => setViewedDay((k) => addDays(k, -1));
@@ -543,6 +841,19 @@ function App() {
             <h3>My Treasures</h3>
             <span className="coll-count">{collectionDetail.length} / ∞</span>
           </div>
+          <button
+            className={`tourney-btn${!canRunTourney ? " tourney-btn--disabled" : ""}`}
+            onClick={() => canRunTourney && setShowTournament(true)}
+            disabled={!canRunTourney}
+            title={
+              collectionDetail.length < 2 ? "Collect 2+ treasures to unlock" :
+              tourney.lastDate === todayKey() ? "Already battled today — come back tomorrow!" :
+              "Start the tournament!"
+            }
+          >
+            ⚔️ Tournament
+            {tourney.lastDate === todayKey() && <span className="tourney-btn__done">✓ Done today</span>}
+          </button>
           <div className="coll-grid">
             {collectionDetail.length === 0 && (
               Array.from({length: 8}).map((_, i) => (
@@ -558,6 +869,9 @@ function App() {
                      title={`${c.t.name} · ${tint.label} · ${c.day}`}>
                   <span className="coll-emoji">{c.t.emoji}</span>
                   <span className="coll-name">{c.t.name}</span>
+                  {(tourney.wins[c.t.id] > 0) && (
+                    <span className="coll-win-badge">⚔️ {tourney.wins[c.t.id]}</span>
+                  )}
                 </button>
               );
             })}
@@ -574,6 +888,14 @@ function App() {
       </div>
 
       {showModal && prize && <RevealModal treasure={prize} onClose={() => setShowModal(false)} />}
+      {showTournament && (
+        <TournamentModal
+          collectedAwards={collectionDetail}
+          tourney={tourney}
+          onClose={() => setShowTournament(false)}
+          onWin={recordTourneyWin}
+        />
+      )}}
 
       <TweaksPanel title="Settings" onOpen={() => setSettingsOpen(true)} onClose={() => setSettingsOpen(false)}>
         <TweakSection label="Profile" />

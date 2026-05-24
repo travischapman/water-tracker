@@ -168,4 +168,30 @@ function drawTreasureForDay(dayKey, attempt = 0) {
   return drawTreasure(rng);
 }
 
-Object.assign(window, { TREASURES, TREASURE_TINTS, drawTreasure, drawTreasureForDay });
+function getTreasureStats(treasure) {
+  const seed = String(treasure.id) + treasure.rarity;
+  let h = 1779033703 ^ seed.length;
+  for (let i = 0; i < seed.length; i++) {
+    h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  let state = (h ^ 0x9e3779b9) >>> 0;
+  const rng = () => {
+    state = (state + 0x6D2B79F5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const avg = { common: 3, uncommon: 4.5, rare: 6, epic: 7.5, legendary: 9 }[treasure.rarity] ?? 3;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v)));
+  const stat = () => clamp(avg - 2 + rng() * 4, 1, 10);
+  return {
+    health: clamp(avg * 5 - 8 + rng() * 16, 10, 50),
+    speed:  stat(),
+    sneaky: stat(),
+    damage: stat(),
+  };
+}
+
+Object.assign(window, { TREASURES, TREASURE_TINTS, drawTreasure, drawTreasureForDay, getTreasureStats });
