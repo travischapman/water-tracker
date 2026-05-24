@@ -78,6 +78,60 @@ const DRINKS = [
   { id: "soda",    label: "Soda",       oz: 8,  waterPct: 0.89, color: "#C58BD9", icon: "🥤" },
 ];
 
+// ── Sound effects (Web Audio API, synthesized — no asset files) ───────────
+let _audioCtx = null;
+function playSound(type) {
+  try {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _audioCtx;
+    const now = ctx.currentTime;
+
+    const tone = (freq, start, dur, vol, shape = "sine") => {
+      const osc = ctx.createOscillator();
+      const g   = ctx.createGain();
+      osc.connect(g); g.connect(ctx.destination);
+      osc.type = shape;
+      osc.frequency.setValueAtTime(freq, now + start);
+      g.gain.setValueAtTime(vol, now + start);
+      g.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      osc.start(now + start); osc.stop(now + start + dur + 0.01);
+    };
+    const sweep = (f1, f2, start, dur, vol, shape = "sine") => {
+      const osc = ctx.createOscillator();
+      const g   = ctx.createGain();
+      osc.connect(g); g.connect(ctx.destination);
+      osc.type = shape;
+      osc.frequency.setValueAtTime(f1, now + start);
+      osc.frequency.exponentialRampToValueAtTime(f2, now + start + dur);
+      g.gain.setValueAtTime(vol, now + start);
+      g.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      osc.start(now + start); osc.stop(now + start + dur + 0.01);
+    };
+
+    switch (type) {
+      case "attack":
+        tone(200, 0, 0.08, 0.28, "square");
+        tone(100, 0, 0.14, 0.18, "sawtooth");
+        break;
+      case "dodge":
+        sweep(500, 1100, 0, 0.14, 0.12, "sine");
+        break;
+      case "crit":
+        tone(80,  0, 0.55, 0.5, "sawtooth");
+        tone(180, 0, 0.30, 0.4, "square");
+        tone(360, 0, 0.18, 0.3, "sine");
+        break;
+      case "ko":
+        sweep(380, 55, 0, 0.75, 0.4, "sine");
+        tone(110, 0.1, 0.5, 0.2, "sawtooth");
+        break;
+      case "champion":
+        [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.13, 0.28, 0.3, "sine"));
+        break;
+    }
+  } catch {}
+}
+
 // ── Tournament simulation ──────────────────────────────────────────────────
 function simulateFight(left, right, leftStartHp) {
   let leftHp  = leftStartHp;
@@ -479,18 +533,19 @@ function TourneyBattle({ matchup, matchupIndex, totalMatchups, onMatchupDone }) 
   useEffect(() => {
     setLogVisible([]);
     setAnimState("idle");
-    const delay = matchup.log.length > 30 ? Math.max(80, 6600 / matchup.log.length) : 220;
+    const delay = matchup.log.length > 25 ? Math.max(180, 14000 / matchup.log.length) : 500;
     let i = 0;
     const id = setInterval(() => {
       if (i < matchup.log.length) {
         const ev = matchup.log[i++];
+        playSound(ev.type === "crit" ? "crit" : ev.type === "dodge" ? "dodge" : ev.type === "ko" ? "ko" : "attack");
         setLogVisible(prev => [...prev, ev]);
       } else {
         clearInterval(id);
         setAnimState("smashing");
-        setTimeout(() => setAnimState("loser-out"), 800);
-        setTimeout(() => setAnimState("done"), 1400);
-        setTimeout(onMatchupDone, 2200);
+        setTimeout(() => setAnimState("loser-out"), 900);
+        setTimeout(() => setAnimState("done"), 1600);
+        setTimeout(onMatchupDone, 3200);
       }
     }, delay);
     return () => clearInterval(id);
@@ -506,11 +561,11 @@ function TourneyBattle({ matchup, matchupIndex, totalMatchups, onMatchupDone }) 
       </div>
       <div className="tourney-arena">
         <FighterCard fighter={matchup.left}  side="left"
-          hpMax={matchup.left.startHp}         hpNow={leftHp}
+          hpMax={matchup.left.stats.health}    hpNow={leftHp}
           winnerId={matchup.winnerId} animState={animState} />
         <div className="tourney-vs">VS</div>
         <FighterCard fighter={matchup.right} side="right"
-          hpMax={matchup.right.startHp}        hpNow={rightHp}
+          hpMax={matchup.right.stats.health}   hpNow={rightHp}
           winnerId={matchup.winnerId} animState={animState} />
       </div>
       <BattleLog events={logVisible} />
@@ -519,6 +574,7 @@ function TourneyBattle({ matchup, matchupIndex, totalMatchups, onMatchupDone }) 
 }
 
 function TourneyChampion({ champion, tourney, onClose }) {
+  useEffect(() => { playSound("champion"); }, []);
   const tint      = TREASURE_TINTS[champion.rarity];
   const totalWins = (tourney.wins[champion.id] || 0);
   return (
