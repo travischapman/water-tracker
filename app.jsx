@@ -463,12 +463,35 @@ function PinSetupPrompt({ onSave }) {
   const [pin, setPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
   const [error, setError] = useState("");
+  const confirmRef = useRef(null);
+
+  const attempt = (finalPin, finalConfirm) => {
+    if (finalPin !== finalConfirm) {
+      setError("PINs don't match — try again.");
+      setPin("");
+      setConfirmPin("");
+      return;
+    }
+    onSave(finalPin);
+  };
+
+  const handlePinChange = (e) => {
+    const v = e.target.value.replace(/\D/g, "").slice(0, 4);
+    setPin(v);
+    setError("");
+    if (v.length === 4) confirmRef.current?.focus();
+  };
+
+  const handleConfirmChange = (e) => {
+    const v = e.target.value.replace(/\D/g, "").slice(0, 4);
+    setConfirmPin(v);
+    setError("");
+    if (v.length === 4) attempt(pin, v);
+  };
 
   const submit = (e) => {
     e.preventDefault();
-    if (pin.length < 4) { setError("PIN must be at least 4 digits."); return; }
-    if (pin !== confirmPin) { setError("PINs don't match — try again."); return; }
-    onSave(pin);
+    if (pin.length === 4 && confirmPin.length === 4) attempt(pin, confirmPin);
   };
 
   return (
@@ -483,21 +506,22 @@ function PinSetupPrompt({ onSave }) {
             type="password"
             inputMode="numeric"
             pattern="[0-9]*"
-            placeholder="Create a PIN (4+ digits)"
+            placeholder="Create a 4-digit PIN"
             value={pin}
-            onChange={(e) => { setPin(e.target.value.replace(/\D/g, "").slice(0, 8)); setError(""); }}
+            onChange={handlePinChange}
             autoFocus
-            maxLength={8}
+            maxLength={4}
           />
           <input
+            ref={confirmRef}
             className="name-prompt-input"
             type="password"
             inputMode="numeric"
             pattern="[0-9]*"
             placeholder="Confirm PIN"
             value={confirmPin}
-            onChange={(e) => { setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 8)); setError(""); }}
-            maxLength={8}
+            onChange={handleConfirmChange}
+            maxLength={4}
           />
           {error && <p className="pin-error">{error}</p>}
           <button type="submit" className="prize-close">Save PIN</button>
@@ -512,14 +536,25 @@ function PinPrompt({ title, subtitle, expectedPin, onSuccess, onCancel }) {
   const [pin, setPin] = useState("");
   const [error, setError] = useState(false);
 
-  const submit = (e) => {
-    e.preventDefault();
-    if (pin === expectedPin) {
+  const attempt = (value) => {
+    if (value === expectedPin) {
       onSuccess();
     } else {
       setError(true);
       setPin("");
     }
+  };
+
+  const handleChange = (e) => {
+    const v = e.target.value.replace(/\D/g, "").slice(0, 4);
+    setPin(v);
+    setError(false);
+    if (v.length === 4) attempt(v);
+  };
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (pin.length === 4) attempt(pin);
   };
 
   return (
@@ -534,11 +569,11 @@ function PinPrompt({ title, subtitle, expectedPin, onSuccess, onCancel }) {
             type="password"
             inputMode="numeric"
             pattern="[0-9]*"
-            placeholder="Enter PIN"
+            placeholder="Enter 4-digit PIN"
             value={pin}
-            onChange={(e) => { setPin(e.target.value.replace(/\D/g, "").slice(0, 8)); setError(false); }}
+            onChange={handleChange}
             autoFocus
-            maxLength={8}
+            maxLength={4}
           />
           {error && <p className="pin-error">Wrong PIN — try again.</p>}
           <button type="submit" className="prize-close">Unlock</button>
