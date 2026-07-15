@@ -260,6 +260,11 @@ const formatDay = (k) => {
 };
 
 const STORAGE_KEY = "splashy.v2";
+// One-off flag: the PIN-gate update on 2026-07-15 wiped collected-treasure
+// history for existing players. This grants a make-good backfill of 15
+// random treasures on each browser's first load that day, then never again.
+const COMPENSATION_DATE = "2026-07-15";
+const COMPENSATION_FLAG_KEY = "splashy.comp_2026_07_15";
 
 const loadState = () => {
   try {
@@ -847,8 +852,23 @@ function App() {
   // Hydrate
   useEffect(() => {
     const s = loadState();
-    if (s?.days)   setDays(s.days);
+    let loadedDays = s?.days || {};
     if (s?.tourney) setTourney(s.tourney);
+
+    if (todayKey() === COMPENSATION_DATE && !localStorage.getItem(COMPENSATION_FLAG_KEY)) {
+      try { localStorage.setItem(COMPENSATION_FLAG_KEY, "1"); } catch {}
+      let offset = 1, added = 0;
+      while (added < 15 && offset < 365) {
+        const k = addDays(todayKey(), -offset);
+        offset++;
+        if (loadedDays[k]?.prize) continue;
+        const old = loadedDays[k] || { log: [], revealed: false, prize: null };
+        loadedDays = { ...loadedDays, [k]: { ...old, revealed: true, prize: drawTreasure(Math.random) } };
+        added++;
+      }
+    }
+
+    setDays(loadedDays);
   }, []);
   // Persist
   useEffect(() => { saveState({ days, tourney }); }, [days, tourney]);
