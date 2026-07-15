@@ -128,6 +128,11 @@ function playSound(type) {
       case "champion":
         [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.13, 0.28, 0.3, "sine"));
         break;
+      case "explode":
+        tone(55, 0, 0.5, 0.5, "sawtooth");
+        tone(120, 0, 0.28, 0.35, "square");
+        sweep(900, 150, 0, 0.22, 0.28, "sawtooth");
+        break;
     }
   } catch {}
 }
@@ -453,6 +458,97 @@ function NamePrompt({ onSave }) {
   );
 }
 
+// ── Parent PIN setup (first visit, after name) ─────────────────────────────
+function PinSetupPrompt({ onSave }) {
+  const [pin, setPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [error, setError] = useState("");
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (pin.length < 4) { setError("PIN must be at least 4 digits."); return; }
+    if (pin !== confirmPin) { setError("PINs don't match — try again."); return; }
+    onSave(pin);
+  };
+
+  return (
+    <div className="reveal-backdrop">
+      <div className="reveal-card name-prompt-card">
+        <div className="name-prompt-emoji">🔒</div>
+        <h2 className="name-prompt-title">Set a Parent PIN</h2>
+        <p className="name-prompt-sub">A grown-up should set this. It's needed to log water and to change the daily goal.</p>
+        <form onSubmit={submit}>
+          <input
+            className="name-prompt-input"
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            placeholder="Create a PIN (4+ digits)"
+            value={pin}
+            onChange={(e) => { setPin(e.target.value.replace(/\D/g, "").slice(0, 8)); setError(""); }}
+            autoFocus
+            maxLength={8}
+          />
+          <input
+            className="name-prompt-input"
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            placeholder="Confirm PIN"
+            value={confirmPin}
+            onChange={(e) => { setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 8)); setError(""); }}
+            maxLength={8}
+          />
+          {error && <p className="pin-error">{error}</p>}
+          <button type="submit" className="prize-close">Save PIN</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Parent PIN entry (gates logging + goal changes) ────────────────────────
+function PinPrompt({ title, subtitle, expectedPin, onSuccess, onCancel }) {
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState(false);
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (pin === expectedPin) {
+      onSuccess();
+    } else {
+      setError(true);
+      setPin("");
+    }
+  };
+
+  return (
+    <div className="reveal-backdrop" onClick={onCancel}>
+      <div className="reveal-card name-prompt-card" onClick={(e) => e.stopPropagation()}>
+        <div className="name-prompt-emoji">🔒</div>
+        <h2 className="name-prompt-title">{title}</h2>
+        {subtitle && <p className="name-prompt-sub">{subtitle}</p>}
+        <form onSubmit={submit}>
+          <input
+            className="name-prompt-input"
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            placeholder="Enter PIN"
+            value={pin}
+            onChange={(e) => { setPin(e.target.value.replace(/\D/g, "").slice(0, 8)); setError(false); }}
+            autoFocus
+            maxLength={8}
+          />
+          {error && <p className="pin-error">Wrong PIN — try again.</p>}
+          <button type="submit" className="prize-close">Unlock</button>
+          <button type="button" className="pin-cancel" onClick={onCancel}>Cancel</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Tournament components ──────────────────────────────────────────────────
 function TourneyIntro({ fighters, onStart }) {
   useEffect(() => {
@@ -476,6 +572,34 @@ function TourneyIntro({ fighters, onStart }) {
   );
 }
 
+// Particle burst rendered inside a losing fighter card when it explodes.
+function CardExplosion() {
+  const bits = useMemo(() => Array.from({ length: 10 }, (_, i) => ({
+    angle: (i / 10) * Math.PI * 2 + Math.random() * 0.5,
+    dist: 30 + Math.random() * 40,
+    size: 5 + Math.random() * 7,
+    delay: Math.random() * 40,
+    emoji: Math.random() < 0.4,
+  })), []);
+  return (
+    <div className="card-explosion" aria-hidden="true">
+      {bits.map((b, i) => (
+        b.emoji ? (
+          <span key={i} className="explosion-chip explosion-chip--emoji"
+            style={{ "--dx": `${Math.cos(b.angle) * b.dist}px`, "--dy": `${Math.sin(b.angle) * b.dist}px`,
+                     animationDelay: `${b.delay}ms` }}>
+            💥
+          </span>
+        ) : (
+          <span key={i} className="explosion-chip"
+            style={{ "--dx": `${Math.cos(b.angle) * b.dist}px`, "--dy": `${Math.sin(b.angle) * b.dist}px`,
+                     width: b.size, height: b.size, animationDelay: `${b.delay}ms` }} />
+        )
+      ))}
+    </div>
+  );
+}
+
 function FighterCard({ fighter, side, hpMax, hpNow, winnerId, animState }) {
   const isWinner = fighter.id === winnerId;
   const tint     = TREASURE_TINTS[fighter.rarity];
@@ -486,11 +610,13 @@ function FighterCard({ fighter, side, hpMax, hpNow, winnerId, animState }) {
   if (animState === "smashing" || animState === "loser-out" || animState === "done") {
     extra = isWinner ? " fighter-card--smash" : " fighter-card--loser-shake";
   }
-  if (animState === "loser-out" && !isWinner) extra += " fighter-card--loser-exit";
+  const isExploding = animState === "loser-out" && !isWinner;
+  if (isExploding) extra += " fighter-card--loser-exit fighter-card--exploding";
 
   return (
     <div className={`fighter-card fighter-card--${side}${extra}`}
          style={{ "--cell-bg": tint.bg, "--cell-ring": tint.ring }}>
+      {isExploding && <CardExplosion />}
       <div className="fighter-card__emoji">{fighter.emoji}</div>
       <div className="fighter-card__name">{fighter.name}</div>
       <div className="fighter-card__hp-bar">
@@ -543,7 +669,7 @@ function TourneyBattle({ matchup, matchupIndex, totalMatchups, onMatchupDone }) 
       } else {
         clearInterval(id);
         setAnimState("smashing");
-        setTimeout(() => setAnimState("loser-out"), 900);
+        setTimeout(() => { setAnimState("loser-out"); playSound("explode"); }, 900);
         setTimeout(() => setAnimState("done"), 1600);
         setTimeout(onMatchupDone, 3200);
       }
@@ -644,6 +770,7 @@ function TournamentModal({ collectedAwards, tourney, onClose, onWin }) {
 // ── Main app ───────────────────────────────────────────────────────────────
 const TWEAK_DEFAULTS = {
   kidName: "",
+  parentPin: "",
   dailyGoal: 40,
   theme: "ocean",
   showCollection: true,
@@ -679,6 +806,8 @@ function App() {
   const [showModal, setShowModal] = useState(false);
   const [showTournament, setShowTournament] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pinRequest, setPinRequest] = useState(null);
+  const [goalUnlocked, setGoalUnlocked] = useState(false);
 
   // Hydrate
   useEffect(() => {
@@ -717,6 +846,25 @@ function App() {
     setSplashes((cur) => [...cur, { id: Date.now() + Math.random(), x, y, color: drink.color }]);
   }, [viewedDay, today]);
 
+  // Every drink log requires the parent PIN to be entered.
+  const requestDrinkLog = useCallback((drink, x, y) => {
+    if (viewedDay !== today) return;
+    setPinRequest({
+      title: "Enter Parent PIN",
+      subtitle: `Confirm to log ${drink.label}`,
+      onSuccess: () => { addDrink(drink, x, y); setPinRequest(null); },
+    });
+  }, [viewedDay, today, addDrink]);
+
+  // Changing the daily goal requires the parent PIN to unlock the slider.
+  const requestGoalUnlock = useCallback(() => {
+    setPinRequest({
+      title: "Enter Parent PIN",
+      subtitle: "Confirm to change the daily goal",
+      onSuccess: () => { setGoalUnlocked(true); setPinRequest(null); },
+    });
+  }, []);
+
   const undoLast = () => {
     if (!isToday) return;
     setDays((cur) => {
@@ -747,7 +895,13 @@ function App() {
     .map(([k, d]) => ({ day: k, t: d.prize, rarity: d.prize.rarity }))
     .sort((a, b) => (a.day < b.day ? 1 : -1));
 
-  const canRunTourney = collectionDetail.length >= 2 && tourney.lastDate !== todayKey();
+  // Tournament unlocks only once today's own water goal has been hit,
+  // regardless of which day is currently being viewed.
+  const todayLog = (days[today] || { log: [] }).log;
+  const todayTotal = todayLog.reduce((s, e) => s + e.water, 0);
+  const todayGoalReached = todayTotal >= t.dailyGoal;
+
+  const canRunTourney = collectionDetail.length >= 2 && tourney.lastDate !== todayKey() && todayGoalReached;
 
   // Day navigation
   const goPrev  = () => setViewedDay((k) => addDays(k, -1));
@@ -766,9 +920,12 @@ function App() {
       "--bg-1": theme.bg1, "--bg-2": theme.bg2,
       "--accent": theme.accent, "--chip": theme.chip,
     }}>
-      {/* First-time name prompt */}
+      {/* First-time onboarding: name, then parent PIN */}
       {!t.kidName && (
         <NamePrompt onSave={(name) => setTweak("kidName", name)} />
+      )}
+      {t.kidName && !t.parentPin && (
+        <PinSetupPrompt onSave={(pin) => setTweak("parentPin", pin)} />
       )}
 
       <div className="bg-blobs" aria-hidden="true">
@@ -849,7 +1006,7 @@ function App() {
           <h3 className="col-h">{isToday ? "What did you drink?" : "What was drunk that day"}</h3>
           {isToday ? (
             <div className="drink-grid">
-              {DRINKS.map((d) => <DrinkButton key={d.id} drink={d} onTap={addDrink} />)}
+              {DRINKS.map((d) => <DrinkButton key={d.id} drink={d} onTap={requestDrinkLog} />)}
             </div>
           ) : (
             <div className="past-banner">
@@ -903,6 +1060,7 @@ function App() {
             disabled={!canRunTourney}
             title={
               collectionDetail.length < 2 ? "Collect 2+ treasures to unlock" :
+              !todayGoalReached ? "Hit today's water goal to unlock the tournament!" :
               tourney.lastDate === todayKey() ? "Already battled today — come back tomorrow!" :
               "Start the tournament!"
             }
@@ -951,13 +1109,31 @@ function App() {
           onClose={() => setShowTournament(false)}
           onWin={recordTourneyWin}
         />
-      )}}
+      )}
 
-      <TweaksPanel title="Settings" onOpen={() => setSettingsOpen(true)} onClose={() => setSettingsOpen(false)}>
+      {pinRequest && (
+        <PinPrompt
+          title={pinRequest.title}
+          subtitle={pinRequest.subtitle}
+          expectedPin={t.parentPin}
+          onSuccess={pinRequest.onSuccess}
+          onCancel={() => setPinRequest(null)}
+        />
+      )}
+
+      <TweaksPanel title="Settings" onOpen={() => setSettingsOpen(true)}
+                   onClose={() => { setSettingsOpen(false); setGoalUnlocked(false); }}>
         <TweakSection label="Profile" />
         <TweakText  label="Name" value={t.kidName} placeholder="Your name" onChange={(v) => setTweak("kidName", v)} />
-        <TweakSlider label="Daily goal" value={t.dailyGoal} min={16} max={64} step={4} unit=" oz"
-                     onChange={(v) => setTweak("dailyGoal", v)} />
+        {goalUnlocked ? (
+          <TweakSlider label="Daily goal" value={t.dailyGoal} min={16} max={64} step={4} unit=" oz"
+                       onChange={(v) => setTweak("dailyGoal", v)} />
+        ) : (
+          <div className="twk-row">
+            <div className="twk-lbl"><span>Daily goal</span><span className="twk-val">{t.dailyGoal} oz</span></div>
+            <button type="button" className="twk-btn secondary" onClick={requestGoalUnlock}>🔒 Unlock to change</button>
+          </div>
+        )}
         <TweakSection label="Look" />
         <TweakRadio label="Theme" value={t.theme} options={["ocean","galaxy","meadow"]}
                     onChange={(v) => setTweak("theme", v)} />
