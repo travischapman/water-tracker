@@ -936,7 +936,6 @@ function App() {
   };
 
   const resetToday = () => patchDay(today, { log: [], revealed: false, prize: null });
-  const resetEverything = () => { setDays({}); setTourney({ lastDate: null, wins: {} }); };
 
   const recordTourneyWin = useCallback((treasureId) => {
     setTourney(cur => ({
@@ -1007,6 +1006,10 @@ function App() {
               <button className={`th-opt ${t.theme === "galaxy" ? "active" : ""}`}
                       onClick={() => setTweak("theme", "galaxy")}>
                 <span className="th-dot th-galaxy" />Galaxy
+              </button>
+              <button className={`th-opt ${t.theme === "meadow" ? "active" : ""}`}
+                      onClick={() => setTweak("theme", "meadow")}>
+                <span className="th-dot th-meadow" />Meadow
               </button>
             </div>
             <button className="settings-btn" onClick={openSettings} aria-label="Open settings" title="Settings">
@@ -1190,13 +1193,10 @@ function App() {
           </div>
         )}
         <TweakSection label="Look" />
-        <TweakRadio label="Theme" value={t.theme} options={["ocean","galaxy","meadow"]}
-                    onChange={(v) => setTweak("theme", v)} />
         <TweakToggle label="Show collection" value={t.showCollection}
                      onChange={(v) => setTweak("showCollection", v)} />
         <TweakSection label="Reset" />
         <TweakButton label="Reset today" onClick={resetToday} secondary />
-        <TweakButton label="Reset everything" onClick={resetEverything} secondary />
       </TweaksPanel>
     </div>
   );
